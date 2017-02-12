@@ -43,6 +43,7 @@ boolean DEBUG = true;
 void setup() {
   if (DEBUG) {
     Serial.begin(57600);
+    while (!Serial) {}
   }
   SIM900.begin(19200);
   // Turn on message receiving
@@ -85,7 +86,7 @@ void checkMsg() {
   if (sim900_output.length() != 0) {
     if (check_if_sms(sim900_output)) {
         struct SMS sms = parse_sms(sim900_output);
-        if (validate_phone(sms.phone_number)) {
+        if (authPhoneNumber(sms.phone_number)) {
           // links string to int
           int option = optionLinker(sms.body);
           switchState(option);
@@ -137,7 +138,7 @@ int optionLinker(String str) {
 }
 
 // Validate senders phone number
-boolean validate_phone(String phone) {
+boolean authPhoneNumber(String phone) {
   for (int i = 0; i <= sizeof(PHONE_NUMBERS); i++) {
     if (phone.equals(PHONE_NUMBERS[i])) {
         return true;

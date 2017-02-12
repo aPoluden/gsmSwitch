@@ -1,3 +1,5 @@
+#include <Regexp.h>
+
 #include <SDConfigFile.h>
 #include <SPI.h>
 #include <SD.h>
@@ -5,7 +7,7 @@
 const char CONFIG_FILE_NAME[] = "config.txt";
 boolean DEBUG = true;
 const int CS = 10;
-char *numbers;
+String phoneNumbers[5];
 
 void setup() {
   Serial.begin(115200);
@@ -46,10 +48,13 @@ void setup() {
         Serial.println(pin);
       }
     } else if (cfg.nameIs("PHONE_NUMBERS")) {
-      numbers = cfg.copyValue();
+      char *phones = cfg.copyValue();
+      // numbers = cfg.copyValue();
       if (DEBUG) {
         Serial.print("Phone numbers: ");
-        Serial.println(numbers);
+        Serial.println(phones);
+        //char arr[] = phones;
+        parsePhoneNumbers(phones);
       }
     } else {
       if (DEBUG) {
@@ -63,8 +68,30 @@ void setup() {
   cfg.end();
 }
 
-
 void loop(void) {
+}
 
+void parsePhoneNumbers(char *phonesArr) {
+  Serial.println("parsePhoneNumbers");
+  // sizeof(arr) returns number of bytes that arr occupies in memory
+  int sizeOfArr = sizeof(phoneNumbers) / sizeof(String);
+  char *p = phonesArr;
+  char *str;
+  byte index = 0;
+  while ((str = strtok_r(p, ";", &p)) != NULL) // delimiter is the semicolon
+   if (validatePhoneNumber(str)) {
+    phoneNumbers[index] = str;
+    index++;
+    if (index >= sizeOfArr) {
+      Serial.println("Index overflow");
+      break;  
+    }
+   }
+   
+}
+
+boolean validatePhoneNumber(char *phone) {
+  // TODO implement phone number valildation
+  return true;
 }
 
