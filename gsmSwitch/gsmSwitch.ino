@@ -1,53 +1,54 @@
 #include <Regexp.h>
 #include <FiniteStateMachine.h>
 #include <SoftwareSerial.h>
+#include <SDConfigFile.h>
+#include <SPI.h>
+#include <SD.h>
 
 void turnOff();
 void turnOn();
 void checkMsg();
 
-// Setup
+// Setup params
 byte TIMER;
-byte SWITCH_PIN = 12;
-String PHONE_NUMBERS[] = {"+37067309726"};
+byte SWITCH_PIN;
+String PHONE_NUMBERS[5];
+
+// SD
+const char CONFIG_FILE_NAME[] = "config.txt";
+const int CS = 10;
+const uint8_t CONFIG_LINE_LENGTH = 127;
+SDConfigFile cfg;
+
+boolean DEBUG = true;
+
+// commands
 enum OPTIONS {eOFF, eON};
 String ON = String("on");
 String OFF = String("off");
 
-//byte ON;
-//byte OFF;
-
-// TODO implement 
-struct SETUP {
-  byte TIMER;
-  byte PIN;
-  String PHONE_NUMBERS[] = {};
-  String ON;
-  String OFF;  
-};
 // FSM
 State on = State(turnOn, checkMsg, turnOff);
 State off = State(turnOff, checkMsg, turnOn);
 FSM fsm = FSM(off);
-// SIM900 serial
+
+// Serial
 SoftwareSerial SIM900(7, 8);
 
-// Globals
 struct SMS {
    String phone_number;
    String body;
 };
 
-boolean DEBUG = true;
-
 void setup() {
   if (DEBUG) {
     Serial.begin(57600);
     while (!Serial) {}
-  }
+  }  
+  if (setupSD())
+    setupSysParams();
   SIM900.begin(19200);
-  // Turn on message receiving
-  SIM900.print("AT+CNMI=2,2,0,0,0\r");
+  SIM900.print("AT+CNMI=2,2,0,0,0\r"); // Turn on SIM900 SMS receiving
   fsm.update();
 }
 
@@ -81,7 +82,6 @@ void turnOff() {
 }
 
 void checkMsg() {
-  Serial.println("checkMsg");
   String sim900_output = check_sim900_output();
   if (sim900_output.length() != 0) {
     if (check_if_sms(sim900_output)) {
@@ -163,13 +163,9 @@ SMS parse_sms(String sms) {
     struct SMS smsstrct;
     smsstrct.phone_number = phone;
     smsstrct.body = String(msg);
-    
-    // Serial.println(phone);
-    // Serial.println(msg);
-
     return smsstrct;
-    
 }
+
 // Check if SIM900 output is SMS message
 boolean check_if_sms(String sim_output) {
   String sms_head = "+CMT";
@@ -192,7 +188,7 @@ String check_sim900_output() {
    return sim_output;
 }
 
-// Check if serial available, DEBUG
+// Check if serial available, DEBUG only
 String check_serial() {
   String serial_request = "";
   // Check if available bytes on serial
@@ -206,6 +202,93 @@ String check_serial() {
     }
   }
   return serial_request;
+}
+
+// Setup SD card
+boolean setupSD() {
+  pinMode(CS, OUTPUT);
+  if (!SD.begin(CS)) {
+    Serial.println("SD.begin() failed. Check: ");
+    Serial.println("  card insertion,");
+    Serial.println("  SD shield I/O pins and chip select,");
+    Serial.println("  card formatting.");
+    return false;
+  }
+  Serial.println("...succeeded.");
+  // Open the configuration file.
+  if (!cfg.begin(CONFIG_FILE_NAME, CONFIG_LINE_LENGTH)) {
+    Serial.print("Failed to open configuration file: ");
+    Serial.println(CONFIG_FILE_NAME);
+    return false;
+  }
+  return true;
+}
+
+// Setup system params from SD card
+void setupSysParams() {
+  // setup default settings 
+  // Read each setting from the file.
+  while (cfg.readNextSetting()) {
+    if (cfg.nameIs("TIMER")) {
+      // get TIMER config
+      int timer = cfg.getIntValue();
+      TIMER = timer;
+      // TODO setup timer value
+      if (DEBUG) {
+        Serial.print("Timer: ");
+        Serial.println(timer);
+      }
+    } else if (cfg.nameIs("SWITCH_PIN")) {
+      int pin = cfg.getIntValue();
+      SWITCH_PIN = pin;
+      if (DEBUG) {
+        Serial.print("Switch pin: ");
+        Serial.println(pin);
+      }
+    } else if (cfg.nameIs("PHONE_NUMBERS")) {
+      char *phones = cfg.copyValue();
+      setPhoneNumbers(phones);
+      if (DEBUG) {
+        Serial.print("Phone numbers: ");
+        Serial.println(phones);
+      }
+    } else {
+      if (DEBUG) {
+        Serial.print("Unknown name in config: ");
+        Serial.println(cfg.getName());
+        // TODO implement phone number parser
+      }
+    }
+  }
+  // clean up
+  cfg.end();
+}
+
+void setPhoneNumbers(char *phonesArr) {
+  Serial.println("parsePhoneNumbers");
+  // sizeof(arr) returns number of bytes that arr occupies in memory
+  int sizeOfArr = sizeof(PHONE_NUMBERS) / sizeof(String);
+  char *p = phonesArr;
+  char *str;
+  byte index = 0;
+  while ((str = strtok_r(p, ";", &p)) != NULL) // delimiter is the semicolon
+   if (validatePhoneNumber(str)) {
+    PHONE_NUMBERS[index] = str;
+    index++;
+    if (index >= sizeOfArr) {
+      Serial.println("Index overflow");
+      break;  
+    }
+   }
+}
+
+void setupDefaultSysParams() {
+   // TODO implement setup default settings
+}
+
+boolean validatePhoneNumber(char *phone) {
+  // TODO implement phone number valildation
+  return true;
 }
 
 // Sends commands to SIM900 module
