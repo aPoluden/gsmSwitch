@@ -1,3 +1,5 @@
+#include <Timer.h>
+
 #include <Regexp.h>
 #include <FiniteStateMachine.h>
 #include <SoftwareSerial.h>
@@ -12,15 +14,14 @@ void checkMsg();
 // Setup params
 byte TIMER;
 byte SWITCH_PIN;
-String PHONE_NUMBERS[5];
+String PHONE_NUMBERS[2];
 
 // SD
 const char CONFIG_FILE_NAME[] = "config.txt";
-const int CS = 10;
-const uint8_t CONFIG_LINE_LENGTH = 127;
-SDConfigFile cfg;
+const byte CS = 10;
+const byte CONFIG_LINE_LENGTH = 127;
 
-boolean DEBUG = true;
+long int minute = 60000;
 
 // commands
 enum OPTIONS {eOFF, eON};
@@ -32,7 +33,10 @@ State on = State(turnOn, checkMsg, turnOff);
 State off = State(turnOff, checkMsg, turnOn);
 FSM fsm = FSM(off);
 
-// Serial
+Timer t;
+SDConfigFile cfg;
+
+// UART: SIM900 <--> ARDUINO
 SoftwareSerial SIM900(7, 8);
 
 struct SMS {
@@ -41,42 +45,31 @@ struct SMS {
 };
 
 void setup() {
-  if (DEBUG) {
+  if (true) {
     Serial.begin(57600);
     while (!Serial) {}
   }  
   if (setupSD())
-    setupSysParams();
+    setupSysParams(); // TODO
+  pinMode(SWITCH_PIN, OUTPUT);
   SIM900.begin(19200);
-  SIM900.print("AT+CNMI=2,2,0,0,0\r"); // Turn on SIM900 SMS receiving
+  SIM900.print("AT+CNMI=2,2,0,0,0\r");
   fsm.update();
 }
 
 void loop() {
   fsm.update();
-  // Timer
-  if (DEBUG) {
-    delay(2000);
-    // Interact with sim, DEBUG
-    String serial_input = check_serial();
-    if (serial_input != "") {
-      send_command_to_sim900(serial_input);
-    }
-  }
+  t.update();
 }
 
 void turnOn() {
-  if (DEBUG) {
-    Serial.println("turnOn");
-  }
   digitalWrite(SWITCH_PIN, HIGH);
-  // TODO Turn on timer
+  t.after(TIMER * minute, turnOff);
 }
 
 void turnOff() {
-  if (DEBUG) {
-    Serial.println("turnOff");
-  }
+  if (fsm.isInState(on))
+    fsm.transitionTo(off);
   digitalWrite(SWITCH_PIN, LOW);
   // TODO Turn off timer
 }
@@ -98,11 +91,6 @@ void checkMsg() {
 }
 
 void switchState(int opt) {
-  if (DEBUG) {
-    char buffer[128];
-    sprintf(buffer, "switchState: opt %d", opt);
-    Serial.println(buffer);
-  }
   switch(opt) {
     case eON:
       if (fsm.isInState(off))
@@ -113,24 +101,15 @@ void switchState(int opt) {
         fsm.transitionTo(off);
       break;
     default:
-      if (DEBUG)
-        Serial.println("switchState: wrong option");
       break;
   } 
 }
 
 int optionLinker(String str) {
-  if (DEBUG) {
-    Serial.println("optionLinker: str=" + str);
-  }
   // poor linker logic
   if (ON.equals(str)) {
-    if (DEBUG)
-      Serial.println("optionLinker: ON");
     return eON;
   } else if(str == OFF) {
-    if (DEBUG)
-      Serial.println("optionLinker: OFF");
     return eOFF;
   } else {
     return -1; 
@@ -182,7 +161,7 @@ String check_sim900_output() {
    while (SIM900.available()) {
     sim_output += (char)SIM900.read();
    }
-   if (sim_output != "" && DEBUG) {
+   if (sim_output != "") {
     Serial.print(sim_output);
    }
    return sim_output;
@@ -208,17 +187,12 @@ String check_serial() {
 boolean setupSD() {
   pinMode(CS, OUTPUT);
   if (!SD.begin(CS)) {
-    Serial.println("SD.begin() failed. Check: ");
-    Serial.println("  card insertion,");
-    Serial.println("  SD shield I/O pins and chip select,");
-    Serial.println("  card formatting.");
+    Serial.println("sd open fail");
     return false;
   }
-  Serial.println("...succeeded.");
   // Open the configuration file.
   if (!cfg.begin(CONFIG_FILE_NAME, CONFIG_LINE_LENGTH)) {
-    Serial.print("Failed to open configuration file: ");
-    Serial.println(CONFIG_FILE_NAME);
+    Serial.print("sd read fail");
     return false;
   }
   return true;
@@ -233,39 +207,19 @@ void setupSysParams() {
       // get TIMER config
       int timer = cfg.getIntValue();
       TIMER = timer;
-      // TODO setup timer value
-      if (DEBUG) {
-        Serial.print("Timer: ");
-        Serial.println(timer);
-      }
     } else if (cfg.nameIs("SWITCH_PIN")) {
       int pin = cfg.getIntValue();
       SWITCH_PIN = pin;
-      if (DEBUG) {
-        Serial.print("Switch pin: ");
-        Serial.println(pin);
-      }
     } else if (cfg.nameIs("PHONE_NUMBERS")) {
       char *phones = cfg.copyValue();
       setPhoneNumbers(phones);
-      if (DEBUG) {
-        Serial.print("Phone numbers: ");
-        Serial.println(phones);
-      }
-    } else {
-      if (DEBUG) {
-        Serial.print("Unknown name in config: ");
-        Serial.println(cfg.getName());
-        // TODO implement phone number parser
-      }
-    }
+    } else {}
   }
   // clean up
   cfg.end();
 }
 
 void setPhoneNumbers(char *phonesArr) {
-  Serial.println("parsePhoneNumbers");
   // sizeof(arr) returns number of bytes that arr occupies in memory
   int sizeOfArr = sizeof(PHONE_NUMBERS) / sizeof(String);
   char *p = phonesArr;
@@ -276,7 +230,6 @@ void setPhoneNumbers(char *phonesArr) {
     PHONE_NUMBERS[index] = str;
     index++;
     if (index >= sizeOfArr) {
-      Serial.println("Index overflow");
       break;  
     }
    }
